@@ -1,0 +1,28 @@
+# Binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+/bin/
+/dist/
+
+# Test artifacts
+*.test
+*.out
+coverage.*
+
+# SQLite session databases created by local runs/tests
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+
+# Go build/vendor
+/vendor/
+
+# Editor/OS
+.idea/
+.vscode/
+*.swp
+.DS_Store
