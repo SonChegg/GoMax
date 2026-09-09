@@ -77,7 +77,9 @@ const (
 	OpcodeFileUpload                   Opcode = 87
 	OpcodeFileDownload                 Opcode = 88
 	OpcodeLinkInfo                     Opcode = 89
+	OpcodeGetCommentsUpdates           Opcode = 91
 	OpcodeMsgDeleteRange               Opcode = 92
+	OpcodeMsgDeleteUser                Opcode = 94
 	OpcodeSessionsInfo                 Opcode = 96
 	OpcodeSessionsClose                Opcode = 97
 	OpcodePhoneBindRequest             Opcode = 98
@@ -86,6 +88,7 @@ const (
 	OpcodeGetInboundCalls              Opcode = 103
 	OpcodeAuth2FADetails               Opcode = 104
 	OpcodeExternalCallback             Opcode = 105
+	OpcodePhoneWebappShare             Opcode = 106
 	OpcodeAuthValidatePassword         Opcode = 107
 	OpcodeAuthValidateHint             Opcode = 108
 	OpcodeAuthVerifyEmail              Opcode = 109
@@ -130,6 +133,9 @@ const (
 	OpcodeWebAppInitData               Opcode = 160
 	OpcodeComplain                     Opcode = 161
 	OpcodeComplainReasonsGet           Opcode = 162
+	OpcodeCallHistory                  Opcode = 163
+	OpcodeCallHistoryClear             Opcode = 164
+	OpcodeNotifCallHistory             Opcode = 165
 	OpcodeVideoChatJoin                Opcode = 166
 	OpcodeDraftSave                    Opcode = 176
 	OpcodeDraftDiscard                 Opcode = 177
@@ -145,6 +151,7 @@ const (
 	OpcodeProfileDelete                Opcode = 199
 	OpcodeProfileDeleteTime            Opcode = 200
 	OpcodeTranscribeMedia              Opcode = 202
+	OpcodePhotoURLRefresh              Opcode = 203
 	OpcodeStoriesList                  Opcode = 208
 	OpcodeStoriesListByOwnerID         Opcode = 209
 	OpcodeStoriesGetByOwnerID          Opcode = 210
@@ -182,4 +189,5 @@ const (
 	OpcodeSendVote                     Opcode = 304
 	OpcodeVotersListByAnswer           Opcode = 305
 	OpcodeGetPollUpdates               Opcode = 306
+	OpcodeChatCheckEsia                Opcode = 307
 )

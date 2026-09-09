@@ -48,6 +48,28 @@ func TestNewTCPTransportTrustsEmbeddedCA(t *testing.T) {
 		t.Fatalf("expected the transport's RootCAs pool to include the embedded CA's subject")
 	}
 
+	// The embedded sub CA (the official Android client trusts both root and
+	// sub) must also be present.
+	subOnly := x509.NewCertPool()
+	if !subOnly.AppendCertsFromPEM(data.SubCACert) {
+		t.Fatalf("embedded sub CA failed to parse")
+	}
+	//nolint:staticcheck // Subjects is deprecated but fine for this presence check
+	wantSubSubjects := subOnly.Subjects()
+	if len(wantSubSubjects) == 0 {
+		t.Fatalf("embedded sub CA pool has no subjects")
+	}
+	foundSub := false
+	for _, s := range gotSubjects {
+		if bytes.Equal(s, wantSubSubjects[0]) {
+			foundSub = true
+			break
+		}
+	}
+	if !foundSub {
+		t.Fatalf("expected the transport's RootCAs pool to include the embedded sub CA's subject")
+	}
+
 	// If the system pool is available in this environment, the transport's
 	// pool must be strictly larger than an embedded-CA-only pool, proving
 	// the system CAs were layered in underneath rather than discarded.

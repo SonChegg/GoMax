@@ -50,6 +50,12 @@ func NewTCPTransport(host string, port int, proxyURL string, useTLS bool) (*TCPT
 	if !pool.AppendCertsFromPEM(data.RootCACert) {
 		return nil, fmt.Errorf("transport: failed to parse embedded root CA certificate")
 	}
+	// The official Android client layers both the Russian Trusted Root CA
+	// and Russian Trusted Sub CA onto its trust store (defpackage/kb7.java);
+	// some server chains terminate at the sub CA rather than the root.
+	if !pool.AppendCertsFromPEM(data.SubCACert) {
+		return nil, fmt.Errorf("transport: failed to parse embedded sub CA certificate")
+	}
 
 	return &TCPTransport{
 		host:   host,
