@@ -1,8 +1,11 @@
 package api
 
 import (
+	"bufio"
 	"context"
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/SonChegg/PyMax/protocol"
 	"github.com/SonChegg/PyMax/session"
@@ -33,6 +36,45 @@ const (
 	TwoFactorEmail           TwoFactorAction = 4
 	TwoFactorRemove2FA       TwoFactorAction = 5
 )
+
+// ProfileOption identifies a numeric profile flag related to 2FA, a port of
+// pymax's api.auth.enums.ProfileOptions.
+type ProfileOption int
+
+const (
+	ProfileOptionEsiaVerified                ProfileOption = 1
+	ProfileOptionSecondFactorPasswordEnabled ProfileOption = 2
+	ProfileOptionSecondFactorHasEmail        ProfileOption = 3
+	ProfileOptionSecondFactorHasHint         ProfileOption = 4
+)
+
+// EmailCodeProvider supplies the email verification code used when setting
+// up 2FA email verification via AuthService.Set2FA, a port of pymax's
+// auth.providers.EmailCodeProvider.
+//
+// NOTE: this interface is intentionally re-declared here (rather than
+// imported from package auth) because package auth already imports package
+// api for its Deps.Auth field; importing it back here would create an
+// import cycle. Any type satisfying this method set (including
+// auth.ConsoleEmailCodeProvider) can be passed as an EmailCodeProvider.
+type EmailCodeProvider interface {
+	GetCode(ctx context.Context, email string) (string, error)
+}
+
+// ConsoleEmailCodeProvider reads the 2FA email code from stdin, a port of
+// pymax's auth.providers.ConsoleEmailCodeProvider. It is the default used by
+// Set2FA when an email is supplied but no EmailCodeProvider is given.
+type ConsoleEmailCodeProvider struct{}
+
+func (ConsoleEmailCodeProvider) GetCode(ctx context.Context, email string) (string, error) {
+	fmt.Printf("Enter 2FA email code for %s: ", email)
+	reader := bufio.NewReader(os.Stdin)
+	line, err := reader.ReadString('\n')
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(line), nil
+}
 
 // StartAuthResponse answers a code request, a port of pymax's
 // types.domain.auth.StartAuthResponse.
@@ -457,6 +499,199 @@ func (s *AuthService) ConfirmQR(ctx context.Context, trackID string) (CheckCodeR
 func (s *AuthService) AuthorizeQRLogin(ctx context.Context, qrLink string) error {
 	_, err := s.env.Invoke(ctx, protocol.OpcodeAuthQRApprove, map[string]any{"qrLink": qrLink})
 	return err
+}
+
+// createAuthTrack starts a fresh auth "track" used by the 2FA management
+// endpoints (Set2FA, Remove2FA, ChangePassword), a port of pymax's
+// AuthService._get_track_id.
+func (s *AuthService) createAuthTrack(ctx context.Context) (string, error) {
+	frame, err := s.env.Invoke(ctx, protocol.OpcodeAuthCreateTrack, map[string]any{"type": 0})
+	if err != nil {
+		return "", err
+	}
+	trackID, _ := payloadItem(frame, "trackId").(string)
+	if trackID == "" {
+		return "", fmt.Errorf("api: failed to create auth track")
+	}
+	return trackID, nil
+}
+
+// setPassword submits the 2FA password to be validated for trackID, a port
+// of pymax's AuthService._set_password.
+func (s *AuthService) setPassword(ctx context.Context, trackID, password string) error {
+	_, err := s.env.Invoke(ctx, protocol.OpcodeAuthValidatePassword, map[string]any{
+		"trackId":  trackID,
+		"password": password,
+	})
+	return err
+}
+
+// setEmail requests an email verification code and confirms it against
+// trackID, a port of pymax's AuthService._set_email.
+func (s *AuthService) setEmail(ctx context.Context, trackID, email string, provider EmailCodeProvider) error {
+	if _, err := s.env.Invoke(ctx, protocol.OpcodeAuthVerifyEmail, map[string]any{
+		"trackId": trackID,
+		"email":   email,
+	}); err != nil {
+		return err
+	}
+
+	code, err := provider.GetCode(ctx, email)
+	if err != nil {
+		return err
+	}
+
+	_, err = s.env.Invoke(ctx, protocol.OpcodeAuthCheckEmail, map[string]any{
+		"trackId":    trackID,
+		"verifyCode": code,
+	})
+	return err
+}
+
+// setHint sets the 2FA password hint for trackID, a port of pymax's
+// AuthService._set_hint.
+func (s *AuthService) setHint(ctx context.Context, trackID, hint string) error {
+	_, err := s.env.Invoke(ctx, protocol.OpcodeAuthValidateHint, map[string]any{
+		"trackId": trackID,
+		"hint":    hint,
+	})
+	return err
+}
+
+// checkTwoFactorPassword verifies the account's existing 2FA password
+// against trackID before a management operation (remove/change password), a
+// port of pymax's AuthService._check_2fa_password. Note this uses
+// AUTH_CHECK_PASSWORD, distinct from CheckPassword's
+// AUTH_LOGIN_CHECK_PASSWORD used during the login flow.
+func (s *AuthService) checkTwoFactorPassword(ctx context.Context, trackID, password string) error {
+	_, err := s.env.Invoke(ctx, protocol.OpcodeAuthCheckPassword, map[string]any{
+		"trackId":  trackID,
+		"password": password,
+	})
+	return err
+}
+
+// Set2FA sets the account's 2FA password, optionally attaching a recovery
+// email and/or a password hint, a port of pymax's AuthService.set_2fa.
+// email and hint are optional (nil means "not provided", matching pymax's
+// MISSING sentinel). If email is provided and emailCodeProvider is nil,
+// ConsoleEmailCodeProvider is used, matching pymax's default.
+func (s *AuthService) Set2FA(ctx context.Context, password string, email, hint *string, emailCodeProvider EmailCodeProvider) (bool, error) {
+	trackID, err := s.createAuthTrack(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	if err := s.setPassword(ctx, trackID, password); err != nil {
+		return false, err
+	}
+
+	hasEmail := email != nil
+	hasHint := hint != nil
+
+	if hasEmail {
+		provider := emailCodeProvider
+		if provider == nil {
+			provider = ConsoleEmailCodeProvider{}
+		}
+		if err := s.setEmail(ctx, trackID, *email, provider); err != nil {
+			return false, err
+		}
+	}
+
+	if hasHint {
+		if err := s.setHint(ctx, trackID, *hint); err != nil {
+			return false, err
+		}
+	}
+
+	expectedCapabilities := []TwoFactorAction{TwoFactorSetPassword}
+	if hasHint {
+		expectedCapabilities = append(expectedCapabilities, TwoFactorHint)
+	}
+	if hasEmail {
+		expectedCapabilities = append(expectedCapabilities, TwoFactorEmail)
+	}
+
+	payload := map[string]any{
+		"trackId":              trackID,
+		"password":             password,
+		"expectedCapabilities": expectedCapabilities,
+	}
+	if hasHint {
+		payload["hint"] = *hint
+	}
+
+	if _, err := s.env.Invoke(ctx, protocol.OpcodeAuthSet2FA, payload); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// Remove2FA disables the account's 2FA password, a port of pymax's
+// AuthService.remove_2fa.
+func (s *AuthService) Remove2FA(ctx context.Context, password string) (bool, error) {
+	trackID, err := s.createAuthTrack(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	if err := s.checkTwoFactorPassword(ctx, trackID, password); err != nil {
+		return false, err
+	}
+
+	_, err = s.env.Invoke(ctx, protocol.OpcodeAuthSet2FA, map[string]any{
+		"trackId":              trackID,
+		"remove2fa":            true,
+		"expectedCapabilities": []TwoFactorAction{TwoFactorRemove2FA},
+	})
+	if err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// Check2FA reports whether the account currently has a 2FA password
+// enabled, a port of pymax's AuthService.check_2fa. It inspects the cached
+// profile (populated by Login/MobileLogin2) rather than calling the server.
+func (s *AuthService) Check2FA() bool {
+	me := s.env.Me()
+	if me == nil {
+		return false
+	}
+	for _, opt := range me.ProfileOptions {
+		if ProfileOption(opt) == ProfileOptionSecondFactorPasswordEnabled {
+			return true
+		}
+	}
+	return false
+}
+
+// ChangePassword changes the account's 2FA password from passwordOld to
+// passwordNew, a port of pymax's AuthService.change_password.
+func (s *AuthService) ChangePassword(ctx context.Context, passwordOld, passwordNew string) (bool, error) {
+	trackID, err := s.createAuthTrack(ctx)
+	if err != nil {
+		return false, err
+	}
+
+	if err := s.checkTwoFactorPassword(ctx, trackID, passwordOld); err != nil {
+		return false, err
+	}
+
+	if err := s.setPassword(ctx, trackID, passwordNew); err != nil {
+		return false, err
+	}
+
+	_, err = s.env.Invoke(ctx, protocol.OpcodeAuthSet2FA, map[string]any{
+		"trackId":              trackID,
+		"password":             passwordNew,
+		"expectedCapabilities": []TwoFactorAction{TwoFactorUpdatePassword},
+	})
+	if err != nil {
+		return false, err
+	}
+	return true, nil
 }
 
 func (s *AuthService) mobileMode(ctx context.Context) ([]byte, error) {

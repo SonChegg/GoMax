@@ -95,6 +95,17 @@ func (p *Protocol) decodePayload(payloadBytes []byte, flags int) (map[string]any
 		return nil, err
 	}
 
+	if decoded == nil {
+		// Top-level payload decoded to msgpack nil (e.g. an ack/notification
+		// with no data). pymax's TcpPayloadDecoder._normalize_keys(None)
+		// passes None straight through, leaving InboundFrame.payload = None
+		// rather than a dict; return nil here (not a map wrapping a nil
+		// value) so callers' `payload == nil` / falsy checks agree with
+		// pymax's `if not response.payload:` and treat this as "no
+		// payload" instead of a present-but-empty one.
+		return nil, nil
+	}
+
 	m, ok := decoded.(map[string]any)
 	if !ok {
 		// Top-level payload was not a map; wrap it so callers always see a

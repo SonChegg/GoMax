@@ -54,7 +54,7 @@ func (f *QrFlow) Authenticate(ctx context.Context, deps Deps) (AuthResult, error
 
 	token := result.LoginToken()
 	if token == "" && result.PasswordChallenge != nil {
-		token, err = authenticateWithPassword(ctx, deps, f.PasswordProvider, result.PasswordChallenge.TrackID, hintOf(result.PasswordChallenge.Hint))
+		token, err = authenticateWithPasswordUnbounded(ctx, deps, f.PasswordProvider, result.PasswordChallenge.TrackID, hintOf(result.PasswordChallenge.Hint))
 		if err != nil {
 			return AuthResult{}, err
 		}

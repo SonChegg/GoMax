@@ -37,7 +37,16 @@ type TCPTransport struct {
 // NewTCPTransport builds a TCP transport for the given host/port, optionally
 // tunneled through proxyURL ("socks5://" or "http://"/"https://").
 func NewTCPTransport(host string, port int, proxyURL string, useTLS bool) (*TCPTransport, error) {
-	pool := x509.NewCertPool()
+	pool, err := x509.SystemCertPool()
+	if err != nil || pool == nil {
+		// A port of pymax's transport.tcp.TCPTransport, which builds its SSL
+		// context with ssl.create_default_context() (the OS trust store)
+		// and then layers the embedded CA on top via
+		// load_verify_locations() rather than replacing it. Falling back to
+		// an empty pool here (e.g. on platforms without a system trust
+		// store) still lets the embedded CA below be trusted.
+		pool = x509.NewCertPool()
+	}
 	if !pool.AppendCertsFromPEM(data.RootCACert) {
 		return nil, fmt.Errorf("transport: failed to parse embedded root CA certificate")
 	}

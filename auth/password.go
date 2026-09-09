@@ -5,10 +5,12 @@ import (
 	"fmt"
 )
 
-// authenticateWithPassword runs the 2FA password retry loop shared by the
-// SMS and QR flows, a port of pymax's auth.sms.SmsAuthFlow
-// ._authenticate_with_password / auth.qr.QrAuthFlow._authenticate_with_password
-// (both delegate to the same PasswordProvider protocol from auth/providers.py).
+// authenticateWithPassword runs the 2FA password retry loop used by the SMS
+// flow, a port of pymax's auth.sms.SmsAuthFlow._authenticate_with_password.
+// Unlike the QR flow, pymax's SMS flow bounds the retry loop by
+// app.config.password_max_attempts (raising PasswordAttemptsExceededError
+// once exhausted), which is why this variant honors deps.PasswordMaxAttempts
+// while authenticateWithPasswordUnbounded (used by the QR flow) does not.
 func authenticateWithPassword(ctx context.Context, deps Deps, provider PasswordProvider, trackID, hint string) (string, error) {
 	attempt := 0
 	for deps.PasswordMaxAttempts == nil || *deps.PasswordMaxAttempts > attempt {
@@ -36,6 +38,35 @@ func authenticateWithPassword(ctx context.Context, deps Deps, provider PasswordP
 		attempt++
 	}
 	return "", ErrPasswordAttemptsExceeded
+}
+
+// authenticateWithPasswordUnbounded runs the 2FA password retry loop used by
+// the QR flow, a port of pymax's auth.qr.QrAuthFlow._authenticate_with_password.
+// Unlike the SMS flow, pymax's QR flow retries with an unconditional
+// `while True` and has no attempt cap and no PasswordAttemptsExceededError;
+// it only stops once the password provider returns a login token (or an
+// error/ctx cancellation propagates out of the provider or API call).
+func authenticateWithPasswordUnbounded(ctx context.Context, deps Deps, provider PasswordProvider, trackID, hint string) (string, error) {
+	for {
+		password, err := provider.GetPassword(ctx, hint)
+		if err != nil {
+			return "", err
+		}
+		if password == "" {
+			continue
+		}
+
+		resp, err := deps.Auth.CheckPassword(ctx, trackID, password)
+		if err != nil {
+			continue
+		}
+		if resp.Error != nil {
+			continue
+		}
+		if resp.LoginToken() != "" {
+			return resp.LoginToken(), nil
+		}
+	}
 }
 
 // PasswordFlow re-authenticates an already-known account using only its

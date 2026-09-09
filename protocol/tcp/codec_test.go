@@ -53,6 +53,54 @@ func TestMsgpackEmptyPayloadDecodesToEmptyMap(t *testing.T) {
 	}
 }
 
+// TestDecodePayloadMsgpackNilYieldsNoPayload covers a server frame whose
+// top-level msgpack value is nil (0xc0), e.g. an ack/notification carrying
+// no data. pymax's TcpPayloadDecoder passes that None straight through
+// (InboundFrame.payload stays None); decodePayload must likewise report "no
+// payload" (a nil map) rather than wrapping the nil value in
+// map[string]any{"": nil}, which downstream falsy/`payload == nil` checks
+// (mirroring pymax's `if not response.payload:`) would otherwise miss.
+func TestDecodePayloadMsgpackNilYieldsNoPayload(t *testing.T) {
+	p := NewProtocol()
+
+	nilPayload, err := msgpackEncode(nil)
+	if err != nil {
+		t.Fatalf("msgpackEncode(nil): %v", err)
+	}
+
+	payload, err := p.decodePayload(nilPayload, 0)
+	if err != nil {
+		t.Fatalf("decodePayload: %v", err)
+	}
+	if payload != nil {
+		t.Fatalf("expected a nil payload, got %#v", payload)
+	}
+}
+
+// TestProtocolDecodeMsgpackNilPayloadFrame covers the same scenario at the
+// full Protocol.Decode level: a packed frame whose payload bytes decode to
+// msgpack nil should produce an InboundFrame with a nil Payload/Raw, not one
+// that looks like it carries an (empty-keyed) value.
+func TestProtocolDecodeMsgpackNilPayloadFrame(t *testing.T) {
+	p := NewProtocol()
+
+	nilPayload, err := msgpackEncode(nil)
+	if err != nil {
+		t.Fatalf("msgpackEncode(nil): %v", err)
+	}
+
+	var f Framer
+	raw := f.Pack(10, 2, 5, 128, 0, nilPayload)
+
+	decoded := p.Decode(raw)
+	if decoded.Payload != nil {
+		t.Fatalf("expected nil Payload, got %#v", decoded.Payload)
+	}
+	if decoded.Raw != nil {
+		t.Fatalf("expected nil Raw, got %#v", decoded.Raw)
+	}
+}
+
 func TestFramerPackUnpackRoundtrip(t *testing.T) {
 	var f Framer
 	payload := []byte("hello world")
