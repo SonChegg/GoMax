@@ -419,3 +419,34 @@ func (a *Attachments) UnmarshalJSON(data []byte) error {
 	*a = out
 	return nil
 }
+
+// MarshalJSON re-adds the "_type" discriminator field UnmarshalJSON
+// consumes. Without this, Go's default marshaling of an interface slice
+// only emits each concrete attachment's own struct fields, with nothing
+// to tell a caller (e.g. a consumer re-serializing a decoded Message to
+// its own JSON API) whether a given element was a PhotoAttachment, a
+// StickerAttachment, or anything else — the discriminator only survived
+// one direction.
+func (a Attachments) MarshalJSON() ([]byte, error) {
+	out := make([]map[string]any, len(a))
+	for i, att := range a {
+		if u, ok := att.(UnknownAttachment); ok {
+			// Raw was captured from the original wire object before
+			// dispatching on its type, so it already carries "_type".
+			out[i] = u.Raw
+			continue
+		}
+
+		data, err := json.Marshal(att)
+		if err != nil {
+			return nil, err
+		}
+		var m map[string]any
+		if err := json.Unmarshal(data, &m); err != nil {
+			return nil, err
+		}
+		m["_type"] = string(att.Type())
+		out[i] = m
+	}
+	return json.Marshal(out)
+}

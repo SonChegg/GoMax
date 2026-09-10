@@ -1,6 +1,9 @@
 package types
 
-import "testing"
+import (
+	"encoding/json"
+	"testing"
+)
 
 func TestMessageAttachmentsPolymorphicUnmarshal(t *testing.T) {
 	data := []byte(`{
@@ -37,6 +40,54 @@ func TestMessageAttachmentsPolymorphicUnmarshal(t *testing.T) {
 	}
 	if unknown.Type() != "SOME_FUTURE_TYPE" || unknown.Raw["foo"] != "bar" {
 		t.Fatalf("unexpected unknown attachment: %+v", unknown)
+	}
+}
+
+// TestAttachmentsMarshalJSONRoundTripsType guards against a regression: a
+// consumer decoding a Message (e.g. a web front-end re-serializing it to
+// its own JSON API) needs "_type" to tell a StickerAttachment from a
+// PhotoAttachment from anything else. Attachments previously only knew
+// how to consume "_type" on decode, not re-emit it on encode, so
+// marshaling a decoded Message silently dropped every attachment's type.
+func TestAttachmentsMarshalJSONRoundTripsType(t *testing.T) {
+	data := []byte(`{
+		"id": 1,
+		"time": 1000,
+		"type": "TEXT",
+		"text": "hi",
+		"attaches": [
+			{"_type": "STICKER", "url": "https://example/sticker.webp", "stickerId": 7, "width": 512, "height": 512, "time": 1, "stickerType": "STATIC", "audio": false},
+			{"_type": "PHOTO", "baseUrl": "u", "height": 1, "width": 2, "photoId": 3, "photoToken": "tok"},
+			{"_type": "SOME_FUTURE_TYPE", "foo": "bar"}
+		]
+	}`)
+
+	var msg Message
+	if err := msg.UnmarshalJSON(data); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+
+	remarshaled, err := json.Marshal(msg.Attaches)
+	if err != nil {
+		t.Fatalf("marshal: %v", err)
+	}
+
+	var decoded []map[string]any
+	if err := json.Unmarshal(remarshaled, &decoded); err != nil {
+		t.Fatalf("unmarshal remarshaled: %v", err)
+	}
+	if len(decoded) != 3 {
+		t.Fatalf("expected 3 attachments, got %d", len(decoded))
+	}
+
+	wantTypes := []string{"STICKER", "PHOTO", "SOME_FUTURE_TYPE"}
+	for i, want := range wantTypes {
+		if got := decoded[i]["_type"]; got != want {
+			t.Fatalf("attachment %d: got _type=%v, want %q", i, got, want)
+		}
+	}
+	if decoded[0]["stickerId"] != float64(7) {
+		t.Fatalf("sticker fields lost in round-trip: %+v", decoded[0])
 	}
 }
 
