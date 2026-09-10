@@ -6,6 +6,10 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"image"
+	_ "image/gif"
+	_ "image/jpeg"
+	_ "image/png"
 	"io"
 	"mime/multipart"
 	"net/http"
@@ -221,6 +225,8 @@ func NewVoiceFromPath(path string, durationMs int64) (*Voice, error) {
 type AttachPhotoPayload struct {
 	Type       string `json:"_type"`
 	PhotoToken string `json:"photoToken"`
+	Width      int    `json:"width,omitempty"`
+	Height     int    `json:"height,omitempty"`
 }
 
 // VideoAttachPayload is a video/voice/video-note ready to attach to a
@@ -406,7 +412,20 @@ func (s *UploadService) UploadPhoto(ctx context.Context, photo *Photo, profile b
 		return AttachPhotoPayload{}, fmt.Errorf("gomax: photo upload response missing token for photo_id=%s", photoID)
 	}
 
-	return AttachPhotoPayload{Type: "PHOTO", PhotoToken: entry.Token}, nil
+	// The upload response only carries a token, no dimensions — and without
+	// an explicit width/height on the *message* attach payload below, the
+	// server falls back to auto-cropping every photo to a square preview
+	// (the sender sees that crop; other clients requesting the photo by
+	// its real photoId/token later still get the untouched original,
+	// which is why this only ever showed up for the sender, not the
+	// recipient). Android supplies the true dimensions it already has
+	// from decoding the file before upload; decode them here the same way.
+	var width, height int
+	if cfg, _, err := image.DecodeConfig(bytes.NewReader(data)); err == nil {
+		width, height = cfg.Width, cfg.Height
+	}
+
+	return AttachPhotoPayload{Type: "PHOTO", PhotoToken: entry.Token, Width: width, Height: height}, nil
 }
 
 // UploadVoice uploads a voice message and returns the attachment payload,
