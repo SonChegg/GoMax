@@ -158,6 +158,12 @@ type Config struct {
 	SmsCodeProvider  auth.SmsCodeProvider
 	PasswordProvider auth.PasswordProvider
 	QrProvider       auth.QrHandler
+	// RegistrationProvider, if set, is used instead of RegistrationConfig
+	// when SMS login discovers the phone has no MAX account yet: it's
+	// called interactively and can retry with corrected input against the
+	// same registration token if MAX rejects the name, without requiring a
+	// new SMS code.
+	RegistrationProvider auth.RegistrationProvider
 }
 
 func (c *Config) withDefaults() {

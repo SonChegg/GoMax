@@ -113,6 +113,39 @@ type EmailCodeProvider interface {
 	GetCode(ctx context.Context, email string) (string, error)
 }
 
+// RegistrationProvider supplies the first/last name needed to finish
+// registering a brand-new account. It is called once per attempt (not just
+// once total): MAX validates the name server-side (e.g. rejecting digits
+// or punctuation) and returns a business error without invalidating the
+// registration token, so a rejected attempt can be retried with corrected
+// input against the same token — no fresh SMS code required. lastErr is
+// nil on the first call and holds the previous attempt's rejection
+// otherwise.
+type RegistrationProvider interface {
+	GetRegistration(ctx context.Context, lastErr error) (api.RegistrationConfig, error)
+}
+
+// ConsoleRegistrationProvider reads first/last name from stdin, a port of
+// pymax's interactive registration prompt.
+type ConsoleRegistrationProvider struct{}
+
+func (ConsoleRegistrationProvider) GetRegistration(ctx context.Context, lastErr error) (api.RegistrationConfig, error) {
+	if lastErr != nil {
+		fmt.Printf("Registration rejected: %v\n", lastErr)
+	}
+	fmt.Print("Enter first name: ")
+	firstName, err := readLine()
+	if err != nil {
+		return api.RegistrationConfig{}, err
+	}
+	fmt.Print("Enter last name (optional): ")
+	lastName, err := readLine()
+	if err != nil {
+		return api.RegistrationConfig{}, err
+	}
+	return api.RegistrationConfig{FirstName: firstName, LastName: lastName}, nil
+}
+
 // ConsoleEmailCodeProvider reads the email code from stdin, a port of
 // pymax's auth.providers.ConsoleEmailCodeProvider.
 type ConsoleEmailCodeProvider struct{}

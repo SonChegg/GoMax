@@ -50,7 +50,9 @@ func (c *Client) resolveAuthFlow() auth.Flow {
 	if codeProvider == nil {
 		codeProvider = auth.ConsoleSmsCodeProvider{}
 	}
-	return auth.NewSmsFlow(codeProvider, c.cfg.PasswordProvider)
+	flow := auth.NewSmsFlow(codeProvider, c.cfg.PasswordProvider)
+	flow.RegistrationProvider = c.cfg.RegistrationProvider
+	return flow
 }
 
 func (c *Client) ensureRuntime() error {

@@ -10,10 +10,17 @@ import (
 type SmsFlow struct {
 	CodeProvider     SmsCodeProvider
 	PasswordProvider PasswordProvider
+	// RegistrationProvider, if set, handles a brand-new-account signup
+	// interactively (retrying ConfirmRegistration with the same token on a
+	// rejected name, no fresh SMS needed) instead of requiring a
+	// pre-supplied, non-retryable Deps.RegistrationConfig.
+	RegistrationProvider RegistrationProvider
 }
 
 // NewSmsFlow builds an SMS auth flow. If passwordProvider is nil,
-// ConsolePasswordProvider is used for any 2FA challenge.
+// ConsolePasswordProvider is used for any 2FA challenge. Set the returned
+// flow's RegistrationProvider field directly for interactive, retryable
+// new-account registration.
 func NewSmsFlow(codeProvider SmsCodeProvider, passwordProvider PasswordProvider) *SmsFlow {
 	if passwordProvider == nil {
 		passwordProvider = ConsolePasswordProvider{}
@@ -49,6 +56,11 @@ func (f *SmsFlow) Authenticate(ctx context.Context, deps Deps) (AuthResult, erro
 		token = result.LoginToken()
 	case result.PasswordChallenge != nil:
 		token, err = authenticateWithPassword(ctx, deps, f.PasswordProvider, result.PasswordChallenge.TrackID, hintOf(result.PasswordChallenge.Hint))
+		if err != nil {
+			return AuthResult{}, err
+		}
+	case result.RegisterToken() != "" && f.RegistrationProvider != nil:
+		token, err = authenticateWithRegistration(ctx, deps, f.RegistrationProvider, result.RegisterToken())
 		if err != nil {
 			return AuthResult{}, err
 		}
