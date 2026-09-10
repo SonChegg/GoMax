@@ -44,17 +44,24 @@ type Flow interface {
 // is reached, a port of pymax's auth.exceptions.PasswordAttemptsExceededError.
 var ErrPasswordAttemptsExceeded = errors.New("gomax: 2fa password attempts exhausted")
 
-// SmsCodeProvider supplies the SMS verification code, a port of pymax's
-// auth.providers.SmsCodeProvider.
+// SmsCodeProvider supplies the SMS verification code. Called again (with
+// lastErr set) if MAX rejects the code, so an implementation can let the
+// caller retry against the same SMS instead of forcing a brand-new one —
+// pymax's own SmsAuthFlow has no such retry (a wrong code kills the whole
+// login attempt), which is a real usability gap given MAX can rate-limit a
+// phone number for requesting too many codes.
 type SmsCodeProvider interface {
-	GetCode(ctx context.Context, phone string) (string, error)
+	GetCode(ctx context.Context, phone string, lastErr error) (string, error)
 }
 
 // ConsoleSmsCodeProvider reads the SMS code from stdin, a port of pymax's
 // auth.providers.ConsoleSmsCodeProvider.
 type ConsoleSmsCodeProvider struct{}
 
-func (ConsoleSmsCodeProvider) GetCode(ctx context.Context, phone string) (string, error) {
+func (ConsoleSmsCodeProvider) GetCode(ctx context.Context, phone string, lastErr error) (string, error) {
+	if lastErr != nil {
+		fmt.Printf("Code rejected: %v\n", lastErr)
+	}
 	fmt.Printf("Enter SMS code for %s: ", phone)
 	return readLine()
 }

@@ -40,12 +40,7 @@ func (f *SmsFlow) Authenticate(ctx context.Context, deps Deps) (AuthResult, erro
 		return AuthResult{}, err
 	}
 
-	code, err := f.CodeProvider.GetCode(ctx, deps.Phone)
-	if err != nil {
-		return AuthResult{}, err
-	}
-
-	result, err := deps.Auth.SendCode(ctx, start.Token, code)
+	result, err := authenticateWithSmsCode(ctx, deps, f.CodeProvider, start.Token)
 	if err != nil {
 		return AuthResult{}, err
 	}

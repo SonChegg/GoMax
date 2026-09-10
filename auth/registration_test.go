@@ -132,6 +132,6 @@ func TestSmsFlowUsesRegistrationProviderOverStaticConfig(t *testing.T) {
 
 type fixedCodeProvider struct{ code string }
 
-func (p *fixedCodeProvider) GetCode(ctx context.Context, phone string) (string, error) {
+func (p *fixedCodeProvider) GetCode(ctx context.Context, phone string, lastErr error) (string, error) {
 	return p.code, nil
 }
