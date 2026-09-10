@@ -80,7 +80,7 @@ func newRuntime[C any](cfg Config, isWeb bool, phone string, authFlow auth.Flow,
 		return nil, err
 	}
 
-	return &runtime[C]{
+	rt := &runtime[C]{
 		cfg:        cfg,
 		isWeb:      isWeb,
 		phone:      phone,
@@ -89,7 +89,9 @@ func newRuntime[C any](cfg Config, isWeb bool, phone string, authFlow auth.Flow,
 		dispatcher: dispatch.NewDispatcher(router),
 		authFlow:   authFlow,
 		catalog:    catalog,
-	}, nil
+	}
+	env.Invoke = rt.invoke
+	return rt, nil
 }
 
 // buildConnection constructs the TCP or WebSocket transport/reader/codec

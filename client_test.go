@@ -4,6 +4,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/SonChegg/PyMax/dispatch"
+	"github.com/SonChegg/PyMax/protocol"
 	"github.com/SonChegg/PyMax/types"
 )
 
@@ -45,5 +47,28 @@ func TestConfigDefaults(t *testing.T) {
 	}
 	if cfg.AppVersion == "" {
 		t.Fatalf("expected a default app version, got %+v", cfg)
+	}
+}
+
+// TestRuntimeWiresEnvInvoke guards against a regression where env.Invoke
+// (the func field every api.*Service method calls) was left nil because
+// newRuntime never bound it to the runtime's own invoke method — every
+// live API call nil-panicked despite api package unit tests passing (they
+// construct their own Env with Invoke stubbed directly, bypassing
+// newRuntime entirely). This only surfaced against the real server.
+func TestRuntimeWiresEnvInvoke(t *testing.T) {
+	rt, err := newRuntime[*WebClient](Config{}, true, "", nil, dispatch.NewRouter[*WebClient]())
+	if err != nil {
+		t.Fatalf("newRuntime: %v", err)
+	}
+	if rt.env.Invoke == nil {
+		t.Fatal("env.Invoke was not wired to the runtime's invoke method")
+	}
+
+	// Calling it before a connection is open should return a plain error,
+	// not panic.
+	_, err = rt.env.Invoke(context.Background(), protocol.OpcodePing, nil)
+	if err == nil {
+		t.Fatal("expected an error invoking before the runtime is connected")
 	}
 }
