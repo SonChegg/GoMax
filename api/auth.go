@@ -170,7 +170,7 @@ type CheckQrResponse struct {
 // ConfirmRegistrationResponse is returned after finishing registration, a
 // port of pymax's types.domain.auth.ConfirmRegistrationResponse.
 type ConfirmRegistrationResponse struct {
-	UserToken int64         `json:"userToken"`
+	UserToken LenientInt64  `json:"userToken"`
 	Profile   types.Profile `json:"profile"`
 	TokenType AuthType      `json:"tokenType"`
 	Token     string        `json:"token"`

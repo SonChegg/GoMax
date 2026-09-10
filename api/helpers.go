@@ -1,11 +1,47 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"strconv"
 
 	"github.com/SonChegg/PyMax/protocol"
 )
+
+// LenientInt64 decodes from either a JSON number or a numeric JSON string,
+// matching pydantic's lenient `int` field coercion (pymax declares fields
+// like ConfirmRegistrationResponse.user_token as plain `int`, and pydantic
+// silently accepts a numeric string there) — MAX's wire format isn't
+// consistent about which encoding it uses for large IDs. An empty string
+// decodes to 0.
+type LenientInt64 int64
+
+func (n *LenientInt64) UnmarshalJSON(data []byte) error {
+	trimmed := bytes.TrimSpace(data)
+	if len(trimmed) > 0 && trimmed[0] == '"' {
+		var s string
+		if err := json.Unmarshal(trimmed, &s); err != nil {
+			return err
+		}
+		if s == "" {
+			*n = 0
+			return nil
+		}
+		v, err := strconv.ParseInt(s, 10, 64)
+		if err != nil {
+			return fmt.Errorf("api: LenientInt64: %w", err)
+		}
+		*n = LenientInt64(v)
+		return nil
+	}
+	var v int64
+	if err := json.Unmarshal(trimmed, &v); err != nil {
+		return err
+	}
+	*n = LenientInt64(v)
+	return nil
+}
 
 // ErrMissingPayload mirrors pymax's PyMaxError("Missing payload in response").
 var ErrMissingPayload = fmt.Errorf("api: missing payload in response")
