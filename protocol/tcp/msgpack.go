@@ -1,7 +1,9 @@
 package tcp
 
 import (
+	"bytes"
 	"encoding/binary"
+	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
@@ -74,7 +76,61 @@ func encodeValue(buf []byte, v any) ([]byte, error) {
 	case []any:
 		return encodeArray(buf, val)
 	default:
-		return nil, fmt.Errorf("tcp: msgpack: unsupported type %T", v)
+		return encodeViaJSONFallback(buf, v)
+	}
+}
+
+// encodeViaJSONFallback handles any Go value the fast-path switch in
+// encodeValue doesn't recognize directly: a concretely-typed slice
+// ([]int64, []types.Element, ...), a typed map, a pointer, or a struct.
+// Rather than hand-writing reflection for every shape, it round-trips the
+// value through encoding/json (using its `json:"..."` tags — the same
+// tags pymax's CamelModel payload fields rely on) into the generic
+// map[string]any/[]any/... shape encodeValue already knows how to encode,
+// mirroring how pydantic's model_dump() flattens nested models before
+// pymax's msgpack codec ever sees them.
+//
+// json.Number (via UseNumber) avoids round-tripping every integer through
+// float64, which would change ints to msgpack floats on the wire.
+func encodeViaJSONFallback(buf []byte, v any) ([]byte, error) {
+	data, err := json.Marshal(v)
+	if err != nil {
+		return nil, fmt.Errorf("tcp: msgpack: unsupported type %T: %w", v, err)
+	}
+
+	dec := json.NewDecoder(bytes.NewReader(data))
+	dec.UseNumber()
+	var generic any
+	if err := dec.Decode(&generic); err != nil {
+		return nil, fmt.Errorf("tcp: msgpack: unsupported type %T: %w", v, err)
+	}
+
+	return encodeValue(buf, normalizeJSONNumbers(generic))
+}
+
+// normalizeJSONNumbers walks a tree decoded with json.Number in place,
+// replacing each json.Number with an int64 (if it has no fractional part
+// or exponent) or a float64 otherwise.
+func normalizeJSONNumbers(v any) any {
+	switch val := v.(type) {
+	case map[string]any:
+		for k, e := range val {
+			val[k] = normalizeJSONNumbers(e)
+		}
+		return val
+	case []any:
+		for i, e := range val {
+			val[i] = normalizeJSONNumbers(e)
+		}
+		return val
+	case json.Number:
+		if i, err := val.Int64(); err == nil {
+			return i
+		}
+		f, _ := val.Float64()
+		return f
+	default:
+		return v
 	}
 }
 
