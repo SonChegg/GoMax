@@ -12,7 +12,6 @@ import (
 	"github.com/SonChegg/PyMax/dispatch"
 	"github.com/SonChegg/PyMax/protocol"
 	protocoltcp "github.com/SonChegg/PyMax/protocol/tcp"
-	protocolws "github.com/SonChegg/PyMax/protocol/websocket"
 	"github.com/SonChegg/PyMax/session"
 	"github.com/SonChegg/PyMax/transport"
 	"github.com/SonChegg/PyMax/types"
@@ -100,10 +99,14 @@ func (r *runtime[C]) buildConnection() (*connection.Manager, error) {
 	if r.isWeb {
 		t := transport.NewWebSocketTransport(r.cfg.URL, r.cfg.Proxy)
 		reader := connection.NewWSReader(t)
-		return connection.NewManager(reader, t, protocolws.NewProtocol()), nil
+		// pymax's WebClient uses the same TcpProtocol (binary header +
+		// msgpack) as the raw TCP client, just carried inside WebSocket
+		// binary frames instead of a raw socket; there is no separate JSON
+		// envelope on the wire.
+		return connection.NewManager(reader, t, protocoltcp.NewProtocol()), nil
 	}
 
-	t, err := transport.NewTCPTransport(r.cfg.Host, r.cfg.Port, r.cfg.Proxy, r.cfg.UseSSL)
+	t, err := transport.NewTCPTransport(r.cfg.Host, r.cfg.Port, r.cfg.Proxy, !r.cfg.DisableTLS)
 	if err != nil {
 		return nil, err
 	}
@@ -117,7 +120,7 @@ func (r *runtime[C]) buildStore() (session.Store, error) {
 	if r.cfg.Store != nil {
 		return r.cfg.Store, nil
 	}
-	if !r.cfg.PersistSession {
+	if r.cfg.NoPersistSession {
 		return session.NewInMemoryStore(), nil
 	}
 	return session.NewSQLiteStore(r.cfg.WorkDir, r.cfg.SessionName)
@@ -160,9 +163,7 @@ func (r *runtime[C]) invoke(ctx context.Context, opcode protocol.Opcode, payload
 }
 
 func (r *runtime[C]) codecVersion() int {
-	if r.isWeb {
-		return 11
-	}
+	// Both transports share pymax's TcpProtocol, version 10.
 	return 10
 }
 

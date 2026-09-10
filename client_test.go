@@ -48,6 +48,17 @@ func TestConfigDefaults(t *testing.T) {
 	if cfg.AppVersion == "" {
 		t.Fatalf("expected a default app version, got %+v", cfg)
 	}
+
+	// Regression guard: TLS, reconnect, session persistence and relogin
+	// must all be enabled by default. These are modeled as opt-out
+	// (Disable*/No*) flags specifically so the zero-value Config{} shown
+	// in NewClient/NewWebClient's doc examples enables them, unlike a
+	// plain "Default: true" bool field (whose zero value is false and
+	// silently disables the feature no matter what the comment claims —
+	// this previously left the raw TCP transport running without TLS).
+	if cfg.DisableTLS || cfg.DisableReconnect || cfg.NoPersistSession || cfg.DisableRelogin {
+		t.Fatalf("expected every opt-out flag to default to false (feature enabled), got %+v", cfg)
+	}
 }
 
 // TestRuntimeWiresEnvInvoke guards against a regression where env.Invoke

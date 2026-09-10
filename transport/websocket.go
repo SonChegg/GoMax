@@ -71,8 +71,9 @@ func (t *WebSocketTransport) Close(ctx context.Context) error {
 	return conn.Close()
 }
 
-// Send writes a text frame to the WebSocket (Max's WebSocket protocol is
-// JSON-over-text).
+// Send writes a binary frame to the WebSocket: pymax's WebClient encodes
+// with the same TcpProtocol (binary header + msgpack) as the raw TCP
+// client and carries it inside WebSocket binary frames, not text/JSON.
 func (t *WebSocketTransport) Send(ctx context.Context, data []byte) error {
 	t.mu.Lock()
 	conn := t.conn
@@ -81,7 +82,7 @@ func (t *WebSocketTransport) Send(ctx context.Context, data []byte) error {
 	if conn == nil {
 		return fmt.Errorf("transport: not connected to the server")
 	}
-	return conn.WriteMessage(websocket.TextMessage, data)
+	return conn.WriteMessage(websocket.BinaryMessage, data)
 }
 
 // Recv reads the next full WebSocket message. n is ignored (WebSocket is

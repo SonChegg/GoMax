@@ -121,8 +121,8 @@ func (c *WebClient) Connect(ctx context.Context) error {
 }
 
 // Start connects the client and blocks, dispatching events until the
-// connection closes, reconnecting on network errors if cfg.Reconnect is
-// true. A port of pymax's BaseClient.start.
+// connection closes, reconnecting on network errors unless
+// cfg.DisableReconnect is set. A port of pymax's BaseClient.start.
 func (c *WebClient) Start(ctx context.Context) error {
 	for {
 		if err := c.ensureRuntime(); err != nil {
@@ -142,7 +142,7 @@ func (c *WebClient) Start(ctx context.Context) error {
 		}
 
 		if apiErr, ok := err.(*APIError); ok && isInvalidLoginTokenError(apiErr) {
-			if !c.cfg.Relogin {
+			if c.cfg.DisableRelogin {
 				_ = c.Close(ctx)
 				return err
 			}
@@ -156,9 +156,9 @@ func (c *WebClient) Start(ctx context.Context) error {
 		}
 
 		_ = c.Close(ctx)
-		c.rt.dispatcher.EmitDisconnect(err, c.cfg.Reconnect, c.cfg.ReconnectDelay.Seconds())
+		c.rt.dispatcher.EmitDisconnect(err, !c.cfg.DisableReconnect, c.cfg.ReconnectDelay.Seconds())
 
-		if !c.cfg.Reconnect {
+		if c.cfg.DisableReconnect {
 			return err
 		}
 

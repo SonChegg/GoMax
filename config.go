@@ -113,29 +113,39 @@ func generateWebUserAgent() session.UserAgent {
 // can influence. Zero values pick pymax's defaults; see NewClient/NewWebClient.
 type Config struct {
 	// Connection.
-	Host           string        // TCP host. Default: api2.oneme.ru
-	Port           int           // TCP port. Default: 443
-	UseSSL         bool          // Default: true
-	URL            string        // WebSocket URL for WebClient. Default: wss://api.oneme.ru/websocket
-	Proxy          string        // "socks5://" or "http(s)://" proxy URL.
-	Reconnect      bool          // Reconnect after network errors. Default: true
-	ReconnectDelay time.Duration // Default: 1s
-	RequestTimeout time.Duration // Default: 30s
-	UploadTimeout  time.Duration // Default: 15m
+	Host       string // TCP host. Default: api2.oneme.ru
+	Port       int    // TCP port. Default: 443
+	DisableTLS bool   // Disable TLS on the raw TCP transport. Default: false (TLS enabled)
+	URL        string // WebSocket URL for WebClient. Default: wss://api.oneme.ru/websocket
+	Proxy      string // "socks5://" or "http(s)://" proxy URL.
+	// DisableReconnect stops Start from reconnecting after network errors.
+	// Default: false (reconnect enabled). A plain bool can't tell "unset"
+	// from "explicitly false", so pymax's reconnect=True default is
+	// expressed here as an opt-out rather than an opt-in field.
+	DisableReconnect bool
+	ReconnectDelay   time.Duration // Default: 1s
+	RequestTimeout   time.Duration // Default: 30s
+	UploadTimeout    time.Duration // Default: 15m
 
 	// Session/auth.
-	Token               string // Pre-issued token; skips interactive auth if set.
-	WorkDir             string // Directory for the session database. Default: "."
-	SessionName         string // Session database file name. Default: session.db
-	PersistSession      bool   // Persist the session to SQLite. Default: true
+	Token       string // Pre-issued token; skips interactive auth if set.
+	WorkDir     string // Directory for the session database. Default: "."
+	SessionName string // Session database file name. Default: session.db
+	// NoPersistSession keeps the session in memory instead of SQLite.
+	// Default: false (persisted to SQLite); see the DisableReconnect note
+	// on why this is an opt-out flag rather than a plain "Persist" bool.
+	NoPersistSession    bool
 	Store               session.Store
 	DeviceID            string
 	MtInstanceID        string
 	UserAgent           *session.UserAgent
 	RegistrationConfig  *RegistrationConfig
 	PasswordMaxAttempts *int
-	Relogin             bool // Auto re-authenticate on a revoked token. Default: true
-	Sync                session.SyncOverrides
+	// DisableRelogin turns off automatic re-authentication on a revoked
+	// login token. Default: false (relogin enabled); see the
+	// DisableReconnect note on why this is an opt-out flag.
+	DisableRelogin bool
+	Sync           session.SyncOverrides
 
 	// App version (Client/mobile only).
 	AppVersion string

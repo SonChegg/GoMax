@@ -129,10 +129,10 @@ func (c *Client) Connect(ctx context.Context) error {
 }
 
 // Start connects the client and blocks, dispatching events until the
-// connection closes. On network errors it reconnects automatically if
-// cfg.Reconnect is true (the default); a revoked login token triggers
-// re-authentication if cfg.Relogin is true (the default). A port of
-// pymax's BaseClient.start.
+// connection closes. On network errors it reconnects automatically unless
+// cfg.DisableReconnect is set; a revoked login token triggers
+// re-authentication unless cfg.DisableRelogin is set. A port of pymax's
+// BaseClient.start.
 func (c *Client) Start(ctx context.Context) error {
 	for {
 		if err := c.ensureRuntime(); err != nil {
@@ -152,7 +152,7 @@ func (c *Client) Start(ctx context.Context) error {
 		}
 
 		if apiErr, ok := err.(*APIError); ok && isInvalidLoginTokenError(apiErr) {
-			if !c.cfg.Relogin {
+			if c.cfg.DisableRelogin {
 				_ = c.Close(ctx)
 				return err
 			}
@@ -169,9 +169,9 @@ func (c *Client) Start(ctx context.Context) error {
 		}
 
 		_ = c.Close(ctx)
-		c.rt.dispatcher.EmitDisconnect(err, c.cfg.Reconnect, c.cfg.ReconnectDelay.Seconds())
+		c.rt.dispatcher.EmitDisconnect(err, !c.cfg.DisableReconnect, c.cfg.ReconnectDelay.Seconds())
 
-		if !c.cfg.Reconnect {
+		if c.cfg.DisableReconnect {
 			return err
 		}
 
