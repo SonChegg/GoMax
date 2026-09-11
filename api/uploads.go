@@ -465,13 +465,33 @@ func (s *UploadService) UploadVoice(ctx context.Context, voice *Voice) (VideoAtt
 	req.Header.Set("Content-Range", fmt.Sprintf("bytes 0-%d/%d", size-1, size))
 	req.Header.Set("Content-Type", "application/octet-stream")
 
+	// Like UploadVideo's non-note path: the upload POST completing doesn't
+	// mean Max has finished processing the audio server-side. Referencing
+	// audioId in SendMessage before the matching NOTIF_ATTACH arrives (routed
+	// to HandleVoiceReady by runtime.onEvent) got "video.not.ready" back —
+	// this wait was the one thing UploadVoice never actually did despite the
+	// voiceWaiters/HandleVoiceReady plumbing already existing for it.
+	waitCh := make(chan struct{})
+	s.mu.Lock()
+	s.voiceWaiters[info.VideoID] = waitCh
+	s.mu.Unlock()
+
 	resp, err := s.httpClient().Do(req)
 	if err != nil {
+		s.dropVoiceWaiter(info.VideoID)
 		return VideoAttachPayload{}, fmt.Errorf("gomax: voice upload: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
+		s.dropVoiceWaiter(info.VideoID)
 		return VideoAttachPayload{}, fmt.Errorf("gomax: voice upload failed with status %d", resp.StatusCode)
+	}
+
+	select {
+	case <-waitCh:
+	case <-ctx.Done():
+		s.dropVoiceWaiter(info.VideoID)
+		return VideoAttachPayload{}, ctx.Err()
 	}
 
 	return VideoAttachPayload{
@@ -480,6 +500,12 @@ func (s *UploadService) UploadVoice(ctx context.Context, voice *Voice) (VideoAtt
 		Duration: voice.DurationMs,
 		Wave:     bytes.Repeat([]byte{0}, 80),
 	}, nil
+}
+
+func (s *UploadService) dropVoiceWaiter(audioID int64) {
+	s.mu.Lock()
+	delete(s.voiceWaiters, audioID)
+	s.mu.Unlock()
 }
 
 // UploadVideo uploads a video or video-note and returns the attachment

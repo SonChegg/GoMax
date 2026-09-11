@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/SonChegg/PyMax/protocol"
 )
@@ -74,6 +75,11 @@ func TestUploadPhotoReportsRealDimensions(t *testing.T) {
 // browser-recorded voice messages, which only ever exist as in-memory
 // bytes — never a path on disk like NewVoiceFromPath assumes) end to end
 // through UploadVoice.
+//
+// It also guards the wait-for-ready fix: UploadVoice now blocks on
+// HandleVoiceReady like UploadVideo already did, so this test must
+// simulate the server's NOTIF_ATTACH callback (runtime.onEvent would do
+// this for real) or the call would hang until ctx expires.
 func TestUploadVoiceFromBytes(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -96,7 +102,14 @@ func TestUploadVoiceFromBytes(t *testing.T) {
 		t.Fatalf("NewVoiceFromBytes: %v", err)
 	}
 
-	payload, err := svc.UploadVoice(context.Background(), voice)
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	go func() {
+		time.Sleep(20 * time.Millisecond)
+		svc.HandleVoiceReady(555)
+	}()
+
+	payload, err := svc.UploadVoice(ctx, voice)
 	if err != nil {
 		t.Fatalf("UploadVoice: %v", err)
 	}
@@ -108,5 +121,34 @@ func TestUploadVoiceFromBytes(t *testing.T) {
 	}
 	if payload.Duration != 4200 {
 		t.Errorf("Duration = %d, want 4200", payload.Duration)
+	}
+}
+
+// TestUploadVoiceTimesOutWithoutReadySignal guards the other half of the
+// same fix: if Max never sends the NOTIF_ATTACH ready signal, UploadVoice
+// must give up when ctx expires rather than block forever.
+func TestUploadVoiceTimesOutWithoutReadySignal(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		resp := map[string]any{"info": []map[string]any{{"url": "unused", "videoId": int64(999), "token": "tok-voice"}}}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	ri := &recordedInvoke{responses: map[protocol.Opcode]map[string]any{
+		protocol.OpcodeVideoUpload: {"info": []map[string]any{{"url": srv.URL, "videoId": int64(999), "token": "tok-voice"}}},
+	}}
+	env := NewEnv()
+	env.Invoke = ri.invoke
+	svc := NewUploadService(env)
+
+	voice, err := NewVoiceFromBytes("voice.ogg", []byte("fake opus bytes"), 1000)
+	if err != nil {
+		t.Fatalf("NewVoiceFromBytes: %v", err)
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	if _, err := svc.UploadVoice(ctx, voice); err == nil {
+		t.Fatal("expected a timeout error when the ready signal never arrives")
 	}
 }
