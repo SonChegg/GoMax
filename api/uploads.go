@@ -482,9 +482,24 @@ func (s *UploadService) UploadVoice(ctx context.Context, voice *Voice) (VideoAtt
 		return VideoAttachPayload{}, fmt.Errorf("gomax: voice upload: %w", err)
 	}
 	defer resp.Body.Close()
+	respBody, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		s.dropVoiceWaiter(info.VideoID)
 		return VideoAttachPayload{}, fmt.Errorf("gomax: voice upload failed with status %d", resp.StatusCode)
+	}
+	// The upload CDN answers audio-content rejections (wrong codec, no
+	// audible signal, ...) with HTTP 200 and an {"error_code":...} body
+	// instead of a non-200 status, so the status check above alone lets a
+	// rejected upload sail through to a wait that would then simply never
+	// resolve (Max never sends the ready notification for a file it threw
+	// away) until ctx's deadline.
+	var uploadErr struct {
+		ErrorCode string `json:"error_code"`
+		ErrorData string `json:"error_data"`
+	}
+	if json.Unmarshal(respBody, &uploadErr) == nil && uploadErr.ErrorCode != "" {
+		s.dropVoiceWaiter(info.VideoID)
+		return VideoAttachPayload{}, fmt.Errorf("gomax: voice upload rejected: %s", uploadErr.ErrorData)
 	}
 
 	select {
