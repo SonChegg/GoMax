@@ -220,6 +220,14 @@ func NewVoiceFromPath(path string, durationMs int64) (*Voice, error) {
 	return &Voice{m, durationMs}, err
 }
 
+// NewVoiceFromBytes builds a Voice from in-memory bytes (e.g. a browser's
+// MediaRecorder output) — duration must be supplied explicitly since gomax
+// doesn't vendor an audio-container duration prober, same as VideoNote.
+func NewVoiceFromBytes(name string, raw []byte, durationMs int64) (*Voice, error) {
+	m, err := newMediaSource(raw, "", "", name)
+	return &Voice{m, durationMs}, err
+}
+
 // AttachPhotoPayload is a photo ready to attach to a message, a port of
 // pymax's api.uploads.payloads.AttachPhotoPayload.
 type AttachPhotoPayload struct {

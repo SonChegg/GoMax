@@ -69,3 +69,44 @@ func TestUploadPhotoReportsRealDimensions(t *testing.T) {
 		t.Errorf("dimensions = %dx%d, want %dx%d", payload.Width, payload.Height, wantW, wantH)
 	}
 }
+
+// TestUploadVoiceFromBytes guards NewVoiceFromBytes (added for mappi's
+// browser-recorded voice messages, which only ever exist as in-memory
+// bytes — never a path on disk like NewVoiceFromPath assumes) end to end
+// through UploadVoice.
+func TestUploadVoiceFromBytes(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Errorf("unexpected method %s", r.Method)
+		}
+		resp := map[string]any{"info": []map[string]any{{"url": "unused", "videoId": int64(555), "token": "tok-voice"}}}
+		_ = json.NewEncoder(w).Encode(resp)
+	}))
+	defer srv.Close()
+
+	ri := &recordedInvoke{responses: map[protocol.Opcode]map[string]any{
+		protocol.OpcodeVideoUpload: {"info": []map[string]any{{"url": srv.URL, "videoId": int64(555), "token": "tok-voice"}}},
+	}}
+	env := NewEnv()
+	env.Invoke = ri.invoke
+	svc := NewUploadService(env)
+
+	voice, err := NewVoiceFromBytes("voice.ogg", []byte("fake opus bytes"), 4200)
+	if err != nil {
+		t.Fatalf("NewVoiceFromBytes: %v", err)
+	}
+
+	payload, err := svc.UploadVoice(context.Background(), voice)
+	if err != nil {
+		t.Fatalf("UploadVoice: %v", err)
+	}
+	if payload.Type != "AUDIO" {
+		t.Errorf("Type = %q, want AUDIO", payload.Type)
+	}
+	if payload.AudioID != 555 {
+		t.Errorf("AudioID = %d, want 555", payload.AudioID)
+	}
+	if payload.Duration != 4200 {
+		t.Errorf("Duration = %d, want 4200", payload.Duration)
+	}
+}
