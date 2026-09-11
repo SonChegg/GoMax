@@ -103,6 +103,48 @@ func TestMsgpackEncodesTypedSlicesAndStructs(t *testing.T) {
 	}
 }
 
+// TestMsgpackEncodesByteSlicesInsideTypedMapSlice guards against a
+// regression where a concretely-typed []map[string]any (exactly what
+// api.uploadAttachments/toPayload build for a message's "attaches" list)
+// fell through to the JSON fallback path because it isn't []any — and that
+// fallback, going through encoding/json, silently turned a nested []byte
+// field (the voice-message waveform) into a base64 string instead of a
+// real msgpack bin value, which Max's server then rejected outright.
+func TestMsgpackEncodesByteSlicesInsideTypedMapSlice(t *testing.T) {
+	attaches := []map[string]any{
+		{"_type": "AUDIO", "wave": []byte{1, 2, 3, 4, 5}},
+	}
+
+	encoded, err := msgpackEncode(map[string]any{"attaches": attaches})
+	if err != nil {
+		t.Fatalf("encode: %v", err)
+	}
+	decoded, err := msgpackDecode(encoded)
+	if err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	got, ok := decoded.(map[string]any)
+	if !ok {
+		t.Fatalf("decoded value is not a map: %T", decoded)
+	}
+	list, ok := got["attaches"].([]any)
+	if !ok || len(list) != 1 {
+		t.Fatalf("attaches: got %#v", got["attaches"])
+	}
+	entry, ok := list[0].(map[string]any)
+	if !ok {
+		t.Fatalf("attaches[0]: got %#v", list[0])
+	}
+	wave, ok := entry["wave"].([]byte)
+	if !ok {
+		t.Fatalf("attaches[0][\"wave\"] is %T, want []byte (msgpack bin) — a string here means it was base64-encoded via the JSON fallback", entry["wave"])
+	}
+	if string(wave) != string([]byte{1, 2, 3, 4, 5}) {
+		t.Fatalf("wave = %v, want [1 2 3 4 5]", wave)
+	}
+}
+
 func TestMsgpackEmptyPayloadDecodesToEmptyMap(t *testing.T) {
 	decoded, err := msgpackDecode(nil)
 	if err != nil {

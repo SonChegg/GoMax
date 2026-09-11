@@ -75,6 +75,18 @@ func encodeValue(buf []byte, v any) ([]byte, error) {
 		return encodeMap(buf, val)
 	case []any:
 		return encodeArray(buf, val)
+	case []map[string]any:
+		// A concretely-typed []map[string]any (e.g. the "attaches" list
+		// messages.go builds from toPayload) is a *different* dynamic type
+		// than []any, so without this case it fell through to the JSON
+		// fallback below — which would re-flatten any []byte one of those
+		// maps carries (e.g. VideoAttachPayload.Wave) into a base64 string,
+		// undoing toPayload's own byte-slice preservation one layer up.
+		arr := make([]any, len(val))
+		for i, e := range val {
+			arr[i] = e
+		}
+		return encodeArray(buf, arr)
 	default:
 		return encodeViaJSONFallback(buf, v)
 	}
