@@ -4,7 +4,9 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/SonChegg/PyMax/protocol"
 )
@@ -142,20 +144,63 @@ func decodeList[T any](frame protocol.InboundFrame, key string) ([]T, error) {
 	return v, nil
 }
 
-// toPayload marshals v (a payload struct) to a map[string]any suitable for
+// toPayload converts a payload struct to a map[string]any suitable for
 // InvokeFunc, a port of pymax's CamelModel.to_payload (model_dump with
 // by_alias=True, exclude_none=True). Struct fields must already carry the
 // right JSON tags (required fields with no omitempty, optional fields as
 // pointers/slices/maps with omitempty) for the exclude_none semantics to
 // match.
+//
+// Built via reflection over those same json tags rather than a
+// json.Marshal/Unmarshal round trip: JSON has no binary type, so that round
+// trip silently turned a []byte field (VideoAttachPayload.Wave, the voice
+// message waveform) into a base64 *string*. gomax's own msgpack encoder
+// already emits a raw []byte as a proper msgpack bin value
+// (protocol/tcp/msgpack.go's encodeValue), which is what Max's server
+// expects — but only if a genuine []byte survives to reach it. The
+// base64-string form instead got rejected wholesale with "Invalid
+// attachment" ([proto.payload]), which is why voice messages never sent.
 func toPayload(v any) map[string]any {
-	data, err := json.Marshal(v)
-	if err != nil {
+	rv := reflect.ValueOf(v)
+	for rv.Kind() == reflect.Pointer {
+		if rv.IsNil() {
+			return map[string]any{}
+		}
+		rv = rv.Elem()
+	}
+	if rv.Kind() != reflect.Struct {
 		return map[string]any{}
 	}
-	var m map[string]any
-	if err := json.Unmarshal(data, &m); err != nil {
-		return map[string]any{}
+
+	rt := rv.Type()
+	m := make(map[string]any, rt.NumField())
+	for i := 0; i < rt.NumField(); i++ {
+		field := rt.Field(i)
+		if !field.IsExported() {
+			continue
+		}
+		tag := field.Tag.Get("json")
+		if tag == "-" {
+			continue
+		}
+		name, opts, _ := strings.Cut(tag, ",")
+		if name == "" {
+			name = field.Name
+		}
+		omitempty := false
+		for opts != "" {
+			var opt string
+			opt, opts, _ = strings.Cut(opts, ",")
+			if opt == "omitempty" {
+				omitempty = true
+				break
+			}
+		}
+		fv := rv.Field(i)
+		if omitempty && fv.IsZero() {
+			continue
+		}
+		m[name] = fv.Interface()
 	}
 	return m
 }

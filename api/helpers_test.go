@@ -57,3 +57,40 @@ func TestConfirmRegistrationResponseAcceptsStringUserToken(t *testing.T) {
 		t.Fatalf("got token %q, want %q", resp.Token, "tok-abc")
 	}
 }
+
+// TestToPayloadPreservesByteSlices guards against a regression where
+// toPayload's json.Marshal/Unmarshal round trip silently turned a []byte
+// field into a base64 *string* (JSON has no binary type) before it ever
+// reached gomax's msgpack encoder — which does emit []byte as a proper
+// msgpack bin value, but only for a genuine []byte, not a string that
+// happens to contain base64 text. Max's server rejected the resulting voice
+// message attach payload outright ("Invalid attachment", [proto.payload]).
+func TestToPayloadPreservesByteSlices(t *testing.T) {
+	p := VideoAttachPayload{
+		Type:     "AUDIO",
+		AudioID:  42,
+		Duration: 4200,
+		Wave:     []byte{1, 2, 3, 4, 5},
+	}
+	m := toPayload(p)
+
+	wave, ok := m["wave"].([]byte)
+	if !ok {
+		t.Fatalf("m[\"wave\"] is %T, want []byte", m["wave"])
+	}
+	if string(wave) != string([]byte{1, 2, 3, 4, 5}) {
+		t.Fatalf("wave = %v, want [1 2 3 4 5]", wave)
+	}
+
+	// Zero-value fields tagged omitempty must still be dropped, and
+	// ordinary scalar fields must still come through as themselves.
+	if _, present := m["token"]; present {
+		t.Fatalf("m[\"token\"] should be omitted (zero value, omitempty), got %v", m["token"])
+	}
+	if m["_type"] != "AUDIO" {
+		t.Fatalf("m[\"_type\"] = %v, want AUDIO", m["_type"])
+	}
+	if m["audioId"] != int64(42) {
+		t.Fatalf("m[\"audioId\"] = %v, want 42", m["audioId"])
+	}
+}
